@@ -105,11 +105,11 @@ void setup() {
   pinMode(ONBOARD_LED, OUTPUT);
   digitalWrite(ONBOARD_LED, LOW); // LED ON while starting
 
-  // 1. Initialize Sensor with Auto-Pin Detection
+  // 1. Initialize Sensor with Auto-Pin Detection (D1/D2 or D5/D6)
   sensorOnline = tryInitSensor(4, 5, "Config A (SDA=D2, SCL=D1)");
-  if (!sensorOnline) {
-    sensorOnline = tryInitSensor(5, 4, "Config B (SDA=D1, SCL=D2)");
-  }
+  if (!sensorOnline) sensorOnline = tryInitSensor(5, 4, "Config B (SDA=D1, SCL=D2)");
+  if (!sensorOnline) sensorOnline = tryInitSensor(12, 14, "Config C (SDA=D6, SCL=D5)");
+  if (!sensorOnline) sensorOnline = tryInitSensor(14, 12, "Config D (SDA=D5, SCL=D6)");
 
   // 2. Wi-Fi Configuration (Non-blocking background connection)
   WiFi.persistent(false); // Do not wear the flash with repeated credential saves
@@ -197,12 +197,14 @@ void loop() {
         }
       }
     } else {
-      // Background retry probe every 2 seconds
+      // Background retry probe every 2.5 seconds across D1/D2 and D5/D6
       static uint32_t lastRetry = 0;
-      if (now - lastRetry > 2000) {
+      if (now - lastRetry > 2500) {
         lastRetry = now;
-        sensorOnline = tryInitSensor(4, 5, "Config A");
-        if (!sensorOnline) sensorOnline = tryInitSensor(5, 4, "Config B");
+        sensorOnline = tryInitSensor(4, 5, "Config A (D2/D1)");
+        if (!sensorOnline) sensorOnline = tryInitSensor(5, 4, "Config B (D1/D2)");
+        if (!sensorOnline) sensorOnline = tryInitSensor(12, 14, "Config C (D6/D5)");
+        if (!sensorOnline) sensorOnline = tryInitSensor(14, 12, "Config D (D5/D6)");
       }
 
       // Keep dashboards informed without spamming the socket at 33 Hz.
@@ -210,7 +212,7 @@ void loop() {
       if (!sensorOnline && now - lastOfflineNotice >= 1000) {
         lastOfflineNotice = now;
         webSocket.broadcastTXT("{\"online\":false}");
-        Serial.println("[STATUS] Waiting for MLX90614 sensor on D1/D2...");
+        Serial.println("[STATUS] Waiting for sensor on D1/D2 or D5/D6...");
       }
     }
   }
