@@ -1,7 +1,8 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <WebSocketsServer.h>
-#include "MLX90614_Driver.h"
+#include <Wire.h>
+#include <Adafruit_MLX90614.h>
 #include "HeatMapDSP.h"
 #include "WebDashboard.h"
 
@@ -9,11 +10,9 @@
  * Circuit Heat Mapper & PCB Hotspot Locator
  * Hardware: ESP8266 + MLX90614ESF
  * 
- * Pinout:
- *   ESP8266 3.3V  -> MLX90614 VIN
- *   ESP8266 GND   -> MLX90614 GND
- *   ESP8266 D1(5) -> MLX90614 SCL
- *   ESP8266 D2(4) -> MLX90614 SDA
+ * Auto-detects pinout on D1 & D2:
+ * Config A: SDA=D2 (GPIO 4), SCL=D1 (GPIO 5)
+ * Config B: SDA=D1 (GPIO 5), SCL=D2 (GPIO 4)
  */
 
 // Wi-Fi Credentials
@@ -25,14 +24,15 @@ const char* AP_SSID  = "HeatMapper-AP";
 const char* AP_PASS  = "12345678";
 
 // Hardware & DSP Objects
-MLX90614_Sensor sensor;
+Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 HeatMapDSP dsp;
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
 
-const uint32_t SAMPLE_INTERVAL_MS = 25; // 40 Hz sampling rate
+const uint32_t SAMPLE_INTERVAL_MS = 30; // ~33 Hz sampling rate
 uint32_t lastSampleTime = 0;
 const int ONBOARD_LED = 2; // GPIO 2 (Active LOW)
+bool sensorOnline = false;
 
 void handleRoot() {
   server.send_P(200, "text/html", PAGE_INDEX);
@@ -47,6 +47,27 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
   }
 }
 
+bool tryInitSensor(int sda, int scl, const char* name) {
+  Serial.printf("[I2C] Trying %s (SDA=%d, SCL=%d)... ", name, sda, scl);
+  Wire.begin(sda, scl);
+  Wire.setClockStretchLimit(2000); // Crucial for MLX90614 SMBus clock stretching
+  Wire.setClock(50000); // 50kHz SMBus friendly clock
+  delay(100);
+
+  if (mlx.begin()) {
+    delay(50);
+    double amb = mlx.readAmbientTempC();
+    double obj = mlx.readObjectTempC();
+    if (!isnan(amb) && !isnan(obj) && amb > -40.0 && amb < 125.0) {
+      Serial.printf("SUCCESS!\n[SENSOR] Baseline Ambient: %.2f C | Object: %.2f C\n", (float)amb, (float)obj);
+      dsp.init((float)obj);
+      return true;
+    }
+  }
+  Serial.println("FAILED.");
+  return false;
+}
+
 void setup() {
   Serial.begin(115200);
   delay(300);
@@ -57,20 +78,19 @@ void setup() {
   pinMode(ONBOARD_LED, OUTPUT);
   digitalWrite(ONBOARD_LED, LOW); // LED ON while booting
 
-  // 1. Initialize I2C and MLX90614
-  Serial.print("[I2C] Initializing MLX90614 (SDA=D2, SCL=D1)... ");
-  if (!sensor.begin(4, 5)) {
-    Serial.println("FAILED!");
-    Serial.println("[ERROR] Check 3.3V, GND, D1(SCL), D2(SDA) wiring.");
-  } else {
-    Serial.println("SUCCESS!");
-    float amb = sensor.readAmbientTempC();
-    float obj = sensor.readObjectTempC();
-    Serial.printf("[SENSOR] Baseline Ambient: %.2f C | Initial Object: %.2f C\n", amb, obj);
-    dsp.init(obj);
+  // 1. Initialize Sensor with Auto-Pin Detection
+  // Try Config A: SDA=D2 (GPIO 4), SCL=D1 (GPIO 5)
+  sensorOnline = tryInitSensor(4, 5, "Config A: SDA=D2, SCL=D1");
+  if (!sensorOnline) {
+    // Try Config B: SDA=D1 (GPIO 5), SCL=D2 (GPIO 4)
+    sensorOnline = tryInitSensor(5, 4, "Config B: SDA=D1, SCL=D2");
   }
 
-  // 2. Connect to Wi-Fi Network
+  if (!sensorOnline) {
+    Serial.println("[WARNING] Sensor not responding on D1/D2 yet. Loop will continuously attempt reconnect.");
+  }
+
+  // 2. Wi-Fi Configuration
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(AP_SSID, AP_PASS);
 
@@ -78,33 +98,33 @@ void setup() {
   WiFi.begin(STA_SSID, STA_PASS);
 
   uint32_t startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - startAttempt < 10000)) {
-    delay(400);
+  while (WiFi.status() != WL_CONNECTED && (millis() - startAttempt < 8000)) {
+    delay(300);
     Serial.print(".");
   }
 
   Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("[WIFI] Connected successfully!");
+    Serial.println("[WIFI] Connected to Pico!");
     Serial.print("[HTTP] Circuit Heat Mapper Web URL: http://");
     Serial.println(WiFi.localIP());
   } else {
-    Serial.println("[WIFI] Station connection timed out. Running in standalone AP mode.");
-    Serial.print("[HTTP] Fallback Web URL: http://");
+    Serial.println("[WIFI] Running in standalone AP mode.");
+    Serial.print("[HTTP] Connect to Wi-Fi 'HeatMapper-AP' (pass: 12345678) -> URL: http://");
     Serial.println(WiFi.softAPIP());
   }
 
   // 3. Start Web and WebSocket Servers
   server.on("/", handleRoot);
   server.begin();
-  Serial.println("[HTTP] Web server started on port 80");
+  Serial.println("[HTTP] Web server active on port 80");
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  Serial.println("[WS] WebSocket server started on port 81");
+  Serial.println("[WS] WebSocket active on port 81");
 
   digitalWrite(ONBOARD_LED, HIGH); // LED OFF when ready
-  Serial.println("\n[READY] Hold sensor 5mm - 10mm above PCB components to map heat.");
+  Serial.println("\n[READY] System operational. Web dashboard ready to map heat.");
 }
 
 void loop() {
@@ -115,21 +135,38 @@ void loop() {
   if (now - lastSampleTime >= SAMPLE_INTERVAL_MS) {
     lastSampleTime = now;
 
-    // Read sensor
-    float rawObj = sensor.readObjectTempC();
-    float rawAmb = sensor.readAmbientTempC();
+    float rawObj = 0.0f;
+    float rawAmb = 0.0f;
+
+    if (sensorOnline) {
+      rawObj = (float)mlx.readObjectTempC();
+      rawAmb = (float)mlx.readAmbientTempC();
+
+      // Check for bus drop
+      if (isnan(rawObj) || isnan(rawAmb) || rawAmb < -40.0f) {
+        sensorOnline = false;
+      }
+    } else {
+      // Background retry probe
+      static uint32_t lastRetry = 0;
+      if (now - lastRetry > 2000) {
+        lastRetry = now;
+        sensorOnline = tryInitSensor(4, 5, "Config A");
+        if (!sensorOnline) sensorOnline = tryInitSensor(5, 4, "Config B");
+      }
+    }
 
     // Process DSP metrics
     HeatMetrics m = dsp.process(rawObj, rawAmb, now);
 
-    // LED alert on hotspot
+    // Visual LED feedback for hotspots
     if (m.isHotspot) {
       digitalWrite(ONBOARD_LED, LOW); // LED ON
     } else {
       digitalWrite(ONBOARD_LED, HIGH); // LED OFF
     }
 
-    // Broadcast compact JSON telemetry packet to web UI
+    // Broadcast JSON telemetry to browser
     char jsonBuffer[140];
     snprintf(jsonBuffer, sizeof(jsonBuffer),
       "{\"t_obj\":%.2f,\"t_amb\":%.2f,\"delta\":%.2f,\"rate\":%.2f,\"peak\":%.2f}",
@@ -137,13 +174,17 @@ void loop() {
     );
     webSocket.broadcastTXT(jsonBuffer);
 
-    // Periodic Serial output for debugging
+    // Periodic Serial Plotter trace
     static uint32_t lastSerial = 0;
-    if (now - lastSerial >= 250) {
+    if (now - lastSerial >= 300) {
       lastSerial = now;
-      Serial.printf("Obj: %.2f C | Amb: %.2f C | Delta: +%.2f C | Peak: %.2f C\n",
-        m.filteredObj, m.rawAmb, m.delta, m.peakTemp
-      );
+      if (sensorOnline) {
+        Serial.printf("Obj: %.2f C | Amb: %.2f C | Delta: +%.2f C | Peak: %.2f C\n",
+          m.filteredObj, m.rawAmb, m.delta, m.peakTemp
+        );
+      } else {
+        Serial.println("[STATUS] Waiting for MLX90614 sensor on D1/D2...");
+      }
     }
   }
 }
