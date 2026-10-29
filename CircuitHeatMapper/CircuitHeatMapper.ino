@@ -62,19 +62,21 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
 bool tryInitSensor(int sda, int scl, const char* name) {
   Serial.printf("[I2C] Probing %s (SDA=%d, SCL=%d)... ", name, sda, scl);
   Wire.begin(sda, scl);
-  Wire.setClockStretchLimit(2000);
+  Wire.setClockStretchLimit(10000);
   Wire.setClock(50000);
-  delay(80);
+  delay(60);
 
-  if (mlx.begin()) {
-    delay(40);
-    float amb = (float)mlx.readAmbientTempC();
-    float obj = (float)mlx.readObjectTempC();
-    if (isValidReading(obj, amb)) {
-      Serial.printf("SUCCESS!\n[SENSOR] Ambient: %.2f C | Object: %.2f C\n", amb, obj);
-      dsp.init(obj);
-      return true;
-    }
+  // Initialize library instance
+  mlx.begin();
+  delay(40);
+
+  // Directly attempt reading temperature registers (handles SMBus sensors that reject 0-byte probe scans)
+  float amb = (float)mlx.readAmbientTempC();
+  float obj = (float)mlx.readObjectTempC();
+  if (isValidReading(obj, amb)) {
+    Serial.printf("SUCCESS!\n[SENSOR] Ambient: %.2f C | Object: %.2f C\n", amb, obj);
+    dsp.init(obj);
+    return true;
   }
   Serial.println("FAILED.");
   return false;
