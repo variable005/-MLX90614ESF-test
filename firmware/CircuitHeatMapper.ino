@@ -1,6 +1,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <WebSocketsServer.h>
+#include <ESP8266mDNS.h>
 #include <Wire.h>
 #include <Adafruit_MLX90614.h>
 #include "HeatMapDSP.h"
@@ -10,7 +11,7 @@
  * Circuit Heat Mapper & PCB Hotspot Locator
  * Hardware: ESP8266 + MLX90614ESF
  * 
- * Network: Station Mode only (SSID: Pico)
+ * Network: Station Mode (Pico) + mDNS (http://heatmapper.local)
  */
 
 // Wi-Fi Credentials
@@ -27,6 +28,7 @@ const uint32_t SAMPLE_INTERVAL_MS = 30; // ~33 Hz sampling rate
 uint32_t lastSampleTime = 0;
 const int ONBOARD_LED = 2; // GPIO 2 (Active LOW)
 bool sensorOnline = false;
+bool wifiAnnounced = false;
 
 void handleRoot() {
   server.send_P(200, "text/html", PAGE_INDEX);
@@ -45,11 +47,11 @@ bool tryInitSensor(int sda, int scl, const char* name) {
   Serial.printf("[I2C] Probing %s (SDA=%d, SCL=%d)... ", name, sda, scl);
   Wire.begin(sda, scl);
   Wire.setClockStretchLimit(2000);
-  Wire.setClock(50000); // 50kHz SMBus friendly clock
-  delay(100);
+  Wire.setClock(50000);
+  delay(80);
 
   if (mlx.begin()) {
-    delay(50);
+    delay(40);
     double amb = mlx.readAmbientTempC();
     double obj = mlx.readObjectTempC();
     if (!isnan(amb) && !isnan(obj) && amb > -40.0 && amb < 125.0) {
@@ -70,7 +72,7 @@ void setup() {
   Serial.println("========================================");
 
   pinMode(ONBOARD_LED, OUTPUT);
-  digitalWrite(ONBOARD_LED, LOW); // LED ON while connecting
+  digitalWrite(ONBOARD_LED, LOW); // LED ON while starting
 
   // 1. Initialize Sensor with Auto-Pin Detection
   sensorOnline = tryInitSensor(4, 5, "Config A (SDA=D2, SCL=D1)");
@@ -78,28 +80,13 @@ void setup() {
     sensorOnline = tryInitSensor(5, 4, "Config B (SDA=D1, SCL=D2)");
   }
 
-  // 2. Wi-Fi Configuration: Strict Station Mode (No AP)
-  WiFi.persistent(false);
+  // 2. Wi-Fi Configuration (Non-blocking background connection)
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-  delay(100);
-
-  Serial.printf("[WIFI] Connecting to '%s' (Station Mode only)...", STA_SSID);
+  WiFi.setAutoReconnect(true);
+  Serial.printf("[WIFI] Connecting to '%s' in background...\n", STA_SSID);
   WiFi.begin(STA_SSID, STA_PASS);
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(400);
-    Serial.print(".");
-    // Blink LED while waiting for Wi-Fi
-    digitalWrite(ONBOARD_LED, !digitalRead(ONBOARD_LED));
-  }
-
-  digitalWrite(ONBOARD_LED, HIGH); // LED OFF when connected
-  Serial.println("\n[WIFI] Connected successfully to Pico!");
-  Serial.print("[HTTP] Circuit Heat Mapper Web URL: http://");
-  Serial.println(WiFi.localIP());
-
-  // 3. Start Web and WebSocket Servers
+  // 3. Start Web and WebSocket Servers immediately
   server.on("/", handleRoot);
   server.begin();
   Serial.println("[HTTP] Web server active on port 80");
@@ -108,12 +95,30 @@ void setup() {
   webSocket.onEvent(webSocketEvent);
   Serial.println("[WS] WebSocket active on port 81");
 
-  Serial.println("\n[READY] Open the URL above in your browser to view the heatmap.");
+  // 4. mDNS responder: access via http://heatmapper.local
+  if (MDNS.begin("heatmapper")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("[mDNS] Responder active: http://heatmapper.local");
+  }
+
+  digitalWrite(ONBOARD_LED, HIGH); // LED OFF when servers ready
 }
 
 void loop() {
   server.handleClient();
   webSocket.loop();
+  MDNS.update();
+
+  // Announce Wi-Fi connection once established
+  if (WiFi.status() == WL_CONNECTED && !wifiAnnounced) {
+    wifiAnnounced = true;
+    Serial.println("\n========================================");
+    Serial.println("  [WIFI] CONNECTED TO PICO!");
+    Serial.print("  [URL]  http://");
+    Serial.println(WiFi.localIP());
+    Serial.println("  [mDNS] http://heatmapper.local");
+    Serial.println("========================================\n");
+  }
 
   uint32_t now = millis();
   if (now - lastSampleTime >= SAMPLE_INTERVAL_MS) {
@@ -130,7 +135,7 @@ void loop() {
         sensorOnline = false;
       }
     } else {
-      // Background retry probe
+      // Background retry probe every 2 seconds
       static uint32_t lastRetry = 0;
       if (now - lastRetry > 2000) {
         lastRetry = now;
@@ -159,7 +164,7 @@ void loop() {
 
     // Periodic Serial Plotter trace
     static uint32_t lastSerial = 0;
-    if (now - lastSerial >= 300) {
+    if (now - lastSerial >= 400) {
       lastSerial = now;
       if (sensorOnline) {
         Serial.printf("Obj: %.2f C | Amb: %.2f C | Delta: +%.2f C | Peak: %.2f C\n",

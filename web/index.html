@@ -308,9 +308,13 @@
       <span>Circuit Heat Mapper</span>
       <span class="badge-hw">ESP8266 + MLX90614</span>
     </div>
-    <div class="status-pill" id="connPill">
-      <div class="dot" id="statusDot"></div>
-      <span id="connLabel">Connecting...</span>
+    <div style="display: flex; align-items: center; gap: 0.6rem;">
+      <input type="text" id="targetHostInput" placeholder="heatmapper.local or IP" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-subtle); color: #fff; padding: 0.35rem 0.65rem; border-radius: 6px; font-size: 0.75rem; width: 170px;" value="heatmapper.local">
+      <button onclick="reconnectToHost()" style="background: rgba(56,189,248,0.2); border: 1px solid var(--accent-cyan); color: #fff; padding: 0.35rem 0.65rem; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Connect</button>
+      <div class="status-pill" id="connPill">
+        <div class="dot" id="statusDot"></div>
+        <span id="connLabel">Connecting...</span>
+      </div>
     </div>
   </header>
 
@@ -775,28 +779,47 @@
 
     // WebSocket Client
     let ws = null;
+    let wsHost = window.location.hostname || 'heatmapper.local';
+    if (document.getElementById('targetHostInput')) {
+      document.getElementById('targetHostInput').value = wsHost;
+    }
+
+    function reconnectToHost() {
+      const inputVal = document.getElementById('targetHostInput').value.trim();
+      if (inputVal) {
+        wsHost = inputVal;
+        if (ws) {
+          ws.onclose = null;
+          ws.close();
+        }
+        connectWS();
+      }
+    }
+
     function connectWS() {
-      const host = window.location.hostname || '192.168.4.1';
-      ws = new WebSocket(`ws://${host}:81/`);
-
-      ws.onopen = () => {
-        connLabel.textContent = 'ESP8266 Live';
-        statusDot.style.background = '#10b981';
-      };
-
-      ws.onmessage = (evt) => {
-        try {
-          processPacket(JSON.parse(evt.data));
-        } catch (e) {}
-      };
-
-      ws.onclose = () => {
+      connLabel.textContent = `Connecting...`;
+      statusDot.style.background = '#38bdf8';
+      try {
+        ws = new WebSocket(`ws://${wsHost}:81/`);
+        ws.onopen = () => {
+          connLabel.textContent = 'ESP8266 Live';
+          statusDot.style.background = '#10b981';
+        };
+        ws.onmessage = (evt) => {
+          try {
+            processPacket(JSON.parse(evt.data));
+          } catch (e) {}
+        };
+        ws.onclose = () => {
+          connLabel.textContent = 'Demo Mode (Offline)';
+          statusDot.style.background = '#f59e0b';
+          setTimeout(() => { if (!ws || ws.readyState !== WebSocket.OPEN) connectWS(); }, 3500);
+        };
+        ws.onerror = () => ws.close();
+      } catch (err) {
         connLabel.textContent = 'Demo Mode (Offline)';
         statusDot.style.background = '#f59e0b';
-        setTimeout(connectWS, 2500);
-      };
-
-      ws.onerror = () => ws.close();
+      }
     }
     connectWS();
 
