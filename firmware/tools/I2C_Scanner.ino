@@ -24,9 +24,9 @@ void loop() {
     error = Wire.endTransmission();
 
     if (error == 0) {
-      Serial.printf("  [✓] I2C device found at address 0x%02X", address);
+      Serial.printf("  [FOUND] I2C device at address 0x%02X", address);
       if (address == 0x5A) {
-        Serial.print("  <-- MLX90614 Contactless IR Thermometer!");
+        Serial.print("  <-- MLX90614 Contactless IR Thermometer");
       } else if (address == 0x3C || address == 0x3D) {
         Serial.print("  <-- OLED Display (SSD1306)");
       } else if (address == 0x57) {
@@ -35,12 +35,12 @@ void loop() {
       Serial.println();
       nDevices++;
     } else if (error == 4) {
-      Serial.printf("  [!] Unknown error at address 0x%02X\n", address);
+      Serial.printf("  [ERROR] Unknown error at address 0x%02X\n", address);
     }
   }
 
   if (nDevices == 0) {
-    Serial.println("  [X] No I2C devices found. Check 3.3V, GND, D1, D2 connections.");
+    Serial.println("  [NONE] No I2C devices found. Check 3.3V, GND, D1, D2 connections.");
   } else {
     Serial.printf("Scan complete. %d device(s) found.\n", nDevices);
   }

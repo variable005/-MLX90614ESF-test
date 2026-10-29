@@ -6,7 +6,7 @@
 #include "WebDashboard.h"
 
 /**
- * 🫁 Vagus Breath Engine & Contactless Spirometer
+ * Vagus Breath Engine & Contactless Spirometer
  * Hardware: ESP8266 + MLX90614ESF
  * 
  * Pinout:
@@ -53,7 +53,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("\n\n========================================");
-  Serial.println("  🫁 VAGUS BREATH ENGINE - ESP8266");
+  Serial.println("  VAGUS BREATH ENGINE - ESP8266");
   Serial.println("========================================");
 
   pinMode(ONBOARD_LED, OUTPUT);
@@ -63,7 +63,7 @@ void setup() {
   Serial.print("[I2C] Initializing MLX90614 (SDA=D2, SCL=D1)... ");
   if (!sensor.begin(4, 5)) {
     Serial.println("FAILED!");
-    Serial.println("⚠️ Check wiring: 3.3V, GND, D1(SCL), D2(SDA)");
+    Serial.println("[ERROR] Check wiring: 3.3V, GND, D1(SCL), D2(SDA)");
   } else {
     Serial.println("SUCCESS!");
     float amb = sensor.readAmbientTempC();
@@ -105,7 +105,7 @@ void setup() {
   webSocket.onEvent(webSocketEvent);
   Serial.println("[WS] WebSocket server started on port 81");
 
-  Serial.println("\n🚀 System Ready! Breathe gently towards sensor (10-20 cm away).");
+  Serial.println("\n[READY] System initialized. Breathe gently towards sensor (10-20 cm away).");
 }
 
 void loop() {

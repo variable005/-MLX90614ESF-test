@@ -13,7 +13,7 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🫁 Vagus Breath Engine | Contactless Spirometer</title>
+  <title>Vagus Breath Engine | Contactless Spirometer</title>
   <style>
     :root {
       --bg-gradient: radial-gradient(circle at 50% 20%, #0d1b2a 0%, #050811 100%);
@@ -72,7 +72,7 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
 <body>
   <header>
     <div class="brand">
-      <span style="font-size: 1.5rem;">🫁</span>
+      <div style="font-size: 0.9rem; font-weight: 800; color: var(--accent-cyan); padding: 0.35rem 0.55rem; background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.25); border-radius: 8px;">VBE</div>
       <div>
         <h1>Vagus Breath Engine</h1>
         <div style="font-size: 0.7rem; color: var(--text-muted);">CONTACTLESS INFRARED SPIROMETER</div>
@@ -171,19 +171,18 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
               <div class="mode-title">Free Flow Spirometry</div>
               <div class="mode-desc">Continuous biometric monitoring</div>
             </div>
-            <span>🌱</span>
+            <span style="font-size: 0.7rem; font-weight: 700; color: var(--accent-teal); background: rgba(45,212,191,0.1); padding: 0.2rem 0.5rem; border-radius: 4px;">AUTO</span>
           </button>
           <button class="mode-btn" id="btnModeVagus" onclick="setCoachMode('vagus')">
             <div>
               <div class="mode-title">Vagus Nerve Reset (4s In / 8s Out)</div>
               <div class="mode-desc">Extended exhale parasympathetic brake</div>
             </div>
-            <span>🧘</span>
+            <span style="font-size: 0.7rem; font-weight: 700; color: var(--accent-purple); background: rgba(192,132,252,0.1); padding: 0.2rem 0.5rem; border-radius: 4px;">CALM</span>
           </button>
         </div>
         <div style="margin-top: 1.25rem;">
           <button class="audio-toggle-btn" id="btnAudioDrone" onclick="toggleBioAudio()">
-            <span>🎵</span>
             <span id="audioText">Enable Bio-Harmonic Drone</span>
           </button>
         </div>

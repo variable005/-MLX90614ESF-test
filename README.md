@@ -1,10 +1,10 @@
-# 🫁 Contactless Spirometer & Vagus-Nerve Bio-Feedback Engine
+# Contactless Spirometer & Vagus-Nerve Bio-Feedback Engine
 
 > A touchless respiratory laboratory and bio-feedback system using an **ESP8266** and an **MLX90614ESF** infrared radiometer. Measures breath mechanics, lung capacity, and parasympathetic vagal tone from 10–20 cm away without physical contact.
 
 ---
 
-## ⚡ Hardware Wiring
+## Hardware Wiring
 
 The MLX90614 communicates over standard I2C (`0x5A` default address).
 
@@ -19,7 +19,7 @@ The MLX90614 communicates over standard I2C (`0x5A` default address).
 
 ---
 
-## 🔬 Scientific & Engineering Principles
+## Scientific & Engineering Principles
 
 ### 1. Contactless Thermal Radiometry of Human Breath
 - Ambient indoor air: **~20°C – 24°C**
@@ -51,7 +51,7 @@ Longer, controlled exhales stimulate the **Vagus nerve**, slowing heart rate and
 
 ---
 
-## 🚀 Features
+## Features
 
 - **Zero-Contact Spirometry:** Sit in front of the sensor; no mouthpiece, mask, or chest strap needed.
 - **Embedded Web Server:** ESP8266 hosts its own Wi-Fi Access Point (`Breath-Engine-AP`) and web page.
@@ -65,7 +65,7 @@ Longer, controlled exhales stimulate the **Vagus nerve**, slowing heart rate and
 
 ---
 
-## 🛠️ Quickstart: Flashing & Running
+## Quickstart: Flashing & Running
 
 ### Option A: Using Arduino IDE
 1. Open the Arduino IDE.
@@ -87,7 +87,7 @@ pio run --target upload
 
 ---
 
-## 📱 How to Connect & View
+## How to Connect & View
 
 1. Power on your ESP8266.
 2. On your phone or computer, look for the Wi-Fi network:
@@ -100,7 +100,7 @@ pio run --target upload
 
 ---
 
-## 📈 Testing via Arduino Serial Plotter
+## Testing via Arduino Serial Plotter
 You can also view the live thermal breath waveforms directly on your PC:
 1. Keep the ESP8266 plugged in via USB.
 2. In the Arduino IDE, go to `Tools` -> **`Serial Plotter`** (Set baud rate to `115200`).
