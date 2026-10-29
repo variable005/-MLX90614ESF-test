@@ -66,6 +66,16 @@ bool tryInitSensor(int sda, int scl, const char* name) {
   Wire.setClock(50000);
   delay(60);
 
+  // Scan bus to see if any I2C device responds (e.g. OLED at 0x3C, MAX at 0x57, MLX at 0x5A)
+  int foundDevices = 0;
+  for (byte a = 1; a < 127; a++) {
+    Wire.beginTransmission(a);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("[Found 0x%02X] ", a);
+      foundDevices++;
+    }
+  }
+
   // Initialize library instance
   mlx.begin();
   delay(40);
@@ -77,6 +87,9 @@ bool tryInitSensor(int sda, int scl, const char* name) {
     Serial.printf("SUCCESS!\n[SENSOR] Ambient: %.2f C | Object: %.2f C\n", amb, obj);
     dsp.init(obj);
     return true;
+  }
+  if (foundDevices == 0) {
+    Serial.print("(No devices ACKed) ");
   }
   Serial.println("FAILED.");
   return false;
