@@ -10,18 +10,12 @@
  * Circuit Heat Mapper & PCB Hotspot Locator
  * Hardware: ESP8266 + MLX90614ESF
  * 
- * Auto-detects pinout on D1 & D2:
- * Config A: SDA=D2 (GPIO 4), SCL=D1 (GPIO 5)
- * Config B: SDA=D1 (GPIO 5), SCL=D2 (GPIO 4)
+ * Network: Station Mode only (SSID: Pico)
  */
 
 // Wi-Fi Credentials
 const char* STA_SSID = "Pico";
 const char* STA_PASS = "12345678";
-
-// Standalone Fallback Access Point
-const char* AP_SSID  = "HeatMapper-AP";
-const char* AP_PASS  = "12345678";
 
 // Hardware & DSP Objects
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
@@ -48,9 +42,9 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
 }
 
 bool tryInitSensor(int sda, int scl, const char* name) {
-  Serial.printf("[I2C] Trying %s (SDA=%d, SCL=%d)... ", name, sda, scl);
+  Serial.printf("[I2C] Probing %s (SDA=%d, SCL=%d)... ", name, sda, scl);
   Wire.begin(sda, scl);
-  Wire.setClockStretchLimit(2000); // Crucial for MLX90614 SMBus clock stretching
+  Wire.setClockStretchLimit(2000);
   Wire.setClock(50000); // 50kHz SMBus friendly clock
   delay(100);
 
@@ -59,7 +53,7 @@ bool tryInitSensor(int sda, int scl, const char* name) {
     double amb = mlx.readAmbientTempC();
     double obj = mlx.readObjectTempC();
     if (!isnan(amb) && !isnan(obj) && amb > -40.0 && amb < 125.0) {
-      Serial.printf("SUCCESS!\n[SENSOR] Baseline Ambient: %.2f C | Object: %.2f C\n", (float)amb, (float)obj);
+      Serial.printf("SUCCESS!\n[SENSOR] Ambient: %.2f C | Object: %.2f C\n", (float)amb, (float)obj);
       dsp.init((float)obj);
       return true;
     }
@@ -76,43 +70,34 @@ void setup() {
   Serial.println("========================================");
 
   pinMode(ONBOARD_LED, OUTPUT);
-  digitalWrite(ONBOARD_LED, LOW); // LED ON while booting
+  digitalWrite(ONBOARD_LED, LOW); // LED ON while connecting
 
   // 1. Initialize Sensor with Auto-Pin Detection
-  // Try Config A: SDA=D2 (GPIO 4), SCL=D1 (GPIO 5)
-  sensorOnline = tryInitSensor(4, 5, "Config A: SDA=D2, SCL=D1");
+  sensorOnline = tryInitSensor(4, 5, "Config A (SDA=D2, SCL=D1)");
   if (!sensorOnline) {
-    // Try Config B: SDA=D1 (GPIO 5), SCL=D2 (GPIO 4)
-    sensorOnline = tryInitSensor(5, 4, "Config B: SDA=D1, SCL=D2");
+    sensorOnline = tryInitSensor(5, 4, "Config B (SDA=D1, SCL=D2)");
   }
 
-  if (!sensorOnline) {
-    Serial.println("[WARNING] Sensor not responding on D1/D2 yet. Loop will continuously attempt reconnect.");
-  }
+  // 2. Wi-Fi Configuration: Strict Station Mode (No AP)
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
 
-  // 2. Wi-Fi Configuration
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(AP_SSID, AP_PASS);
-
-  Serial.printf("[WIFI] Connecting to '%s'...", STA_SSID);
+  Serial.printf("[WIFI] Connecting to '%s' (Station Mode only)...", STA_SSID);
   WiFi.begin(STA_SSID, STA_PASS);
 
-  uint32_t startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - startAttempt < 8000)) {
-    delay(300);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(400);
     Serial.print(".");
+    // Blink LED while waiting for Wi-Fi
+    digitalWrite(ONBOARD_LED, !digitalRead(ONBOARD_LED));
   }
 
-  Serial.println();
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("[WIFI] Connected to Pico!");
-    Serial.print("[HTTP] Circuit Heat Mapper Web URL: http://");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("[WIFI] Running in standalone AP mode.");
-    Serial.print("[HTTP] Connect to Wi-Fi 'HeatMapper-AP' (pass: 12345678) -> URL: http://");
-    Serial.println(WiFi.softAPIP());
-  }
+  digitalWrite(ONBOARD_LED, HIGH); // LED OFF when connected
+  Serial.println("\n[WIFI] Connected successfully to Pico!");
+  Serial.print("[HTTP] Circuit Heat Mapper Web URL: http://");
+  Serial.println(WiFi.localIP());
 
   // 3. Start Web and WebSocket Servers
   server.on("/", handleRoot);
@@ -123,8 +108,7 @@ void setup() {
   webSocket.onEvent(webSocketEvent);
   Serial.println("[WS] WebSocket active on port 81");
 
-  digitalWrite(ONBOARD_LED, HIGH); // LED OFF when ready
-  Serial.println("\n[READY] System operational. Web dashboard ready to map heat.");
+  Serial.println("\n[READY] Open the URL above in your browser to view the heatmap.");
 }
 
 void loop() {
@@ -142,7 +126,6 @@ void loop() {
       rawObj = (float)mlx.readObjectTempC();
       rawAmb = (float)mlx.readAmbientTempC();
 
-      // Check for bus drop
       if (isnan(rawObj) || isnan(rawAmb) || rawAmb < -40.0f) {
         sensorOnline = false;
       }
