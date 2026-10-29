@@ -62,3 +62,47 @@ Longer, controlled exhales stimulate the **Vagus nerve**, slowing heart rate and
   - Live RPM (Breaths Per Minute), Exhale Duration, and Coherence Score.
   - Guided breathing coaches (Box Breathing 4-4-4-4, Relaxing 4-7-8, Vagus Nerve 4-8).
   - Ambient WebAudio acoustic drone synchronized with your breathing depth.
+
+---
+
+## 🛠️ Quickstart: Flashing & Running
+
+### Option A: Using Arduino IDE
+1. Open the Arduino IDE.
+2. Ensure you have the **ESP8266 Board package** installed:
+   - Go to `Settings` -> Additional Boards Manager URLs: `http://arduino.esp8266.com/stable/package_esp8266com_index.json`
+   - In `Boards Manager`, search for `ESP8266` and click install.
+3. Install the **WebSockets** library:
+   - Go to `Sketch` -> `Include Library` -> `Manage Libraries...`
+   - Search for **WebSockets** (by *Markus Sattler*) and click Install.
+4. Open [`firmware/BreathEngine.ino`](file:///Users/hariom/Documents/shigoto/embedded/firmware/BreathEngine.ino).
+5. Select your board (e.g. `NodeMCU 1.0 (ESP-12E Module)` or `LOLIN(WEMOS) D1 R2 & mini`).
+6. Click **Upload**.
+
+### Option B: Using VS Code + PlatformIO
+If you use PlatformIO, everything is preconfigured in [`platformio.ini`](file:///Users/hariom/Documents/shigoto/embedded/platformio.ini):
+```bash
+pio run --target upload
+```
+
+---
+
+## 📱 How to Connect & View
+
+1. Power on your ESP8266.
+2. On your phone or computer, look for the Wi-Fi network:
+   - **SSID:** `Breath-Engine-AP`
+   - **Password:** `breathewell`
+3. Open your browser and navigate to:
+   - **`http://192.168.4.1`**
+4. Place the sensor on your desk, pointed gently towards your nose/mouth from **10 to 20 cm away**.
+5. Breathe naturally. Watch the real-time pneumogram curve and expanding Zen mandala respond to your breath!
+
+---
+
+## 📈 Testing via Arduino Serial Plotter
+You can also view the live thermal breath waveforms directly on your PC:
+1. Keep the ESP8266 plugged in via USB.
+2. In the Arduino IDE, go to `Tools` -> **`Serial Plotter`** (Set baud rate to `115200`).
+3. You will see real-time graphical traces of `Delta`, `Baseline`, `Filtered`, and `RPM`.
+
