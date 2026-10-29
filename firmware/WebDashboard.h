@@ -390,7 +390,7 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
       <div class="card">
         <div class="card-head">
           <span class="card-title">Linear Component Sweep Profile (1D Trace)</span>
-          <span style="font-size: 0.75rem; color: var(--text-muted);">Sampling: 50 Hz</span>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Sampling: 33 Hz</span>
         </div>
         <div class="scope-box">
           <canvas id="scopeCanvas"></canvas>
@@ -669,14 +669,42 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
     }
 
     // Packet Processor
+    let sensorReady = true;
+
+    function setConnectionState(label, color) {
+      connLabel.textContent = label;
+      statusDot.style.background = color;
+    }
+
     function processPacket(pkt) {
+      if (pkt.online === false) {
+        sensorReady = false;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          setConnectionState('ESP8266 Live (No Sensor)', '#f59e0b');
+        }
+        elObj.textContent = '--.-';
+        elAmb.textContent = '--.-';
+        elDelta.textContent = '--.-';
+        hudCell.textContent = 'SENSOR OFFLINE';
+        return;
+      }
+
+      if (typeof pkt.t_obj !== 'number' || typeof pkt.t_amb !== 'number') return;
+
+      if (!sensorReady) {
+        sensorReady = true;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          setConnectionState('ESP8266 Live', '#10b981');
+        }
+      }
+
       currentObjTemp = pkt.t_obj;
       currentAmbTemp = pkt.t_amb;
       currentDelta = pkt.delta;
 
       elObj.textContent = currentObjTemp.toFixed(1);
       elAmb.textContent = currentAmbTemp.toFixed(1);
-      elDelta.textContent = `+${currentDelta.toFixed(1)}`;
+      elDelta.textContent = `${currentDelta >= 0 ? '+' : ''}${currentDelta.toFixed(1)}`;
 
       if (currentObjTemp > maxDetectedHotspot) {
         maxDetectedHotspot = currentObjTemp;
@@ -733,9 +761,15 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
     let isAutoDwell = false;
     let dwellStart = 0;
     let lastDwellTemp = 0;
+    let dwellArmed = true;
 
     function toggleAutoDwell() {
       isAutoDwell = !isAutoDwell;
+      if (isAutoDwell) {
+        dwellStart = 0;
+        lastDwellTemp = currentObjTemp;
+        dwellArmed = true;
+      }
       const tag = document.getElementById('autoDwellTag');
       tag.textContent = isAutoDwell ? 'ACTIVE' : 'OFF';
       tag.style.color = isAutoDwell ? '#10b981' : 'var(--text-muted)';
@@ -744,12 +778,25 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
     function checkAutoDwell(temp) {
       if (!isAutoDwell) return;
       const now = Date.now();
+
+      // After a capture, wait for the probe to move before arming the next cell.
+      if (!dwellArmed) {
+        if (Math.abs(temp - lastDwellTemp) > 0.5) {
+          dwellArmed = true;
+          dwellStart = now;
+          lastDwellTemp = temp;
+        }
+        return;
+      }
+
       if (Math.abs(temp - lastDwellTemp) < 0.25) {
         if (dwellStart === 0) dwellStart = now;
         else if (now - dwellStart > 500) {
           // Locked in!
           captureCurrentCell();
+          dwellArmed = false;
           dwellStart = 0;
+          lastDwellTemp = temp;
         }
       } else {
         dwellStart = now;
@@ -759,6 +806,11 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
 
     // Keyboard Shortcuts (Spacebar to capture)
     window.addEventListener('keydown', (e) => {
+      const target = e.target;
+      const tag = (target && target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (target && target.isContentEditable)) {
+        return; // Don't hijack typing in the host input
+      }
       if (e.code === 'Space') {
         e.preventDefault();
         captureCurrentCell();
@@ -788,46 +840,81 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
     // WebSocket Client
     let ws = null;
     let wsHost = window.location.hostname || 'heatmapper.local';
-    if (document.getElementById('targetHostInput')) {
-      document.getElementById('targetHostInput').value = wsHost;
+    let reconnectTimer = null;
+    let connectionId = 0;
+
+    const hostInput = document.getElementById('targetHostInput');
+    if (hostInput) hostInput.value = wsHost;
+
+    function parseHost(value) {
+      let host = value.trim().replace(/^[a-z]+:\/\//i, '');
+      host = host.split('/')[0].replace(/:81$/i, '');
+      return host || 'heatmapper.local';
     }
 
     function reconnectToHost() {
-      const inputVal = document.getElementById('targetHostInput').value.trim();
-      if (inputVal) {
-        wsHost = inputVal;
-        if (ws) {
-          ws.onclose = null;
-          ws.close();
+      if (!hostInput) return;
+      wsHost = parseHost(hostInput.value);
+      hostInput.value = wsHost;
+      connectWS();
+    }
+
+    function scheduleReconnect(id) {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (id === connectionId && (!ws || ws.readyState !== WebSocket.OPEN)) {
+          connectWS();
         }
-        connectWS();
-      }
+      }, 3500);
     }
 
     function connectWS() {
-      connLabel.textContent = `Connecting...`;
-      statusDot.style.background = '#38bdf8';
-      try {
-        ws = new WebSocket(`ws://${wsHost}:81/`);
-        ws.onopen = () => {
-          connLabel.textContent = 'ESP8266 Live';
-          statusDot.style.background = '#10b981';
-        };
-        ws.onmessage = (evt) => {
-          try {
-            processPacket(JSON.parse(evt.data));
-          } catch (e) {}
-        };
-        ws.onclose = () => {
-          connLabel.textContent = 'Demo Mode (Offline)';
-          statusDot.style.background = '#f59e0b';
-          setTimeout(() => { if (!ws || ws.readyState !== WebSocket.OPEN) connectWS(); }, 3500);
-        };
-        ws.onerror = () => ws.close();
-      } catch (err) {
-        connLabel.textContent = 'Demo Mode (Offline)';
-        statusDot.style.background = '#f59e0b';
+      const myId = ++connectionId;
+
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
+      if (ws) {
+        ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+        try { ws.close(); } catch (e) {}
+        ws = null;
+      }
+
+      setConnectionState('Connecting...', '#38bdf8');
+
+      let socket;
+      try {
+        socket = new WebSocket(`ws://${wsHost}:81/`);
+      } catch (err) {
+        setConnectionState('Demo Mode (Offline)', '#f59e0b');
+        scheduleReconnect(myId);
+        return;
+      }
+      ws = socket;
+
+      socket.onopen = () => {
+        if (myId !== connectionId) return;
+        setConnectionState('ESP8266 Live', '#10b981');
+      };
+      socket.onmessage = (evt) => {
+        if (myId !== connectionId) return;
+        try {
+          processPacket(JSON.parse(evt.data));
+        } catch (e) {}
+      };
+      socket.onerror = () => {
+        if (myId === connectionId) {
+          try { socket.close(); } catch (e) {}
+        }
+      };
+      socket.onclose = () => {
+        if (myId !== connectionId) return;
+        ws = null;
+        setConnectionState('Demo Mode (Offline)', '#f59e0b');
+        scheduleReconnect(myId);
+      };
     }
     connectWS();
 
@@ -840,6 +927,7 @@ const char PAGE_INDEX[] PROGMEM = R"rawliteral(
       const noise = (Math.random() - 0.5) * 0.2;
       const simulatedHotspot = (activeRow === 2 && activeCol === 3) ? 48.5 : 0;
       processPacket({
+        online: true,
         t_obj: base + simulatedHotspot + noise + Math.sin(simT * 0.8) * 2,
         t_amb: 23.8,
         delta: Math.max(0, simulatedHotspot + noise + Math.sin(simT * 0.8) * 2)

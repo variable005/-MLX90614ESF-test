@@ -29,15 +29,31 @@ uint32_t lastSampleTime = 0;
 const int ONBOARD_LED = 2; // GPIO 2 (Active LOW)
 bool sensorOnline = false;
 bool wifiAnnounced = false;
+bool mdnsStarted = false;
+
+bool isValidReading(float obj, float amb) {
+  // MLX90614 datasheet range: object -70..382 C, ambient -40..125 C
+  return !isnan(obj) && !isnan(amb) &&
+         obj >= -70.0f && obj <= 382.0f &&
+         amb >= -40.0f && amb <= 125.0f;
+}
 
 void handleRoot() {
   server.send_P(200, "text/html", PAGE_INDEX);
 }
 
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  (void)payload;
+  (void)length;
+
   if (type == WStype_CONNECTED) {
     IPAddress ip = webSocket.remoteIP(num);
     Serial.printf("[WS] Client #%u connected from %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
+
+    // Tell a newly connected dashboard immediately whether the sensor is failing.
+    if (!sensorOnline) {
+      webSocket.sendTXT(num, "{\"online\":false}");
+    }
   } else if (type == WStype_DISCONNECTED) {
     Serial.printf("[WS] Client #%u disconnected\n", num);
   }
@@ -52,11 +68,11 @@ bool tryInitSensor(int sda, int scl, const char* name) {
 
   if (mlx.begin()) {
     delay(40);
-    double amb = mlx.readAmbientTempC();
-    double obj = mlx.readObjectTempC();
-    if (!isnan(amb) && !isnan(obj) && amb > -40.0 && amb < 125.0) {
-      Serial.printf("SUCCESS!\n[SENSOR] Ambient: %.2f C | Object: %.2f C\n", (float)amb, (float)obj);
-      dsp.init((float)obj);
+    float amb = (float)mlx.readAmbientTempC();
+    float obj = (float)mlx.readObjectTempC();
+    if (isValidReading(obj, amb)) {
+      Serial.printf("SUCCESS!\n[SENSOR] Ambient: %.2f C | Object: %.2f C\n", amb, obj);
+      dsp.init(obj);
       return true;
     }
   }
@@ -81,7 +97,9 @@ void setup() {
   }
 
   // 2. Wi-Fi Configuration (Non-blocking background connection)
+  WiFi.persistent(false); // Do not wear the flash with repeated credential saves
   WiFi.mode(WIFI_STA);
+  WiFi.hostname("heatmapper");
   WiFi.setAutoReconnect(true);
   Serial.printf("[WIFI] Connecting to '%s' in background...\n", STA_SSID);
   WiFi.begin(STA_SSID, STA_PASS);
@@ -95,28 +113,29 @@ void setup() {
   webSocket.onEvent(webSocketEvent);
   Serial.println("[WS] WebSocket active on port 81");
 
-  // 4. mDNS responder: access via http://heatmapper.local
-  if (MDNS.begin("heatmapper")) {
-    MDNS.addService("http", "tcp", 80);
-    Serial.println("[mDNS] Responder active: http://heatmapper.local");
-  }
-
   digitalWrite(ONBOARD_LED, HIGH); // LED OFF when servers ready
 }
 
 void loop() {
   server.handleClient();
   webSocket.loop();
-  MDNS.update();
+  if (mdnsStarted) MDNS.update();
 
-  // Announce Wi-Fi connection once established
+  // mDNS must be started only after the station has an IP address.
   if (WiFi.status() == WL_CONNECTED && !wifiAnnounced) {
     wifiAnnounced = true;
     Serial.println("\n========================================");
     Serial.println("  [WIFI] CONNECTED TO PICO!");
     Serial.print("  [URL]  http://");
     Serial.println(WiFi.localIP());
-    Serial.println("  [mDNS] http://heatmapper.local");
+
+    if (MDNS.begin("heatmapper")) {
+      MDNS.addService("http", "tcp", 80);
+      mdnsStarted = true;
+      Serial.println("  [mDNS] http://heatmapper.local");
+    } else {
+      Serial.println("  [mDNS] Responder failed to start");
+    }
     Serial.println("========================================\n");
   }
 
@@ -124,15 +143,43 @@ void loop() {
   if (now - lastSampleTime >= SAMPLE_INTERVAL_MS) {
     lastSampleTime = now;
 
-    float rawObj = 0.0f;
-    float rawAmb = 0.0f;
-
     if (sensorOnline) {
-      rawObj = (float)mlx.readObjectTempC();
-      rawAmb = (float)mlx.readAmbientTempC();
+      float rawObj = (float)mlx.readObjectTempC();
+      float rawAmb = (float)mlx.readAmbientTempC();
 
-      if (isnan(rawObj) || isnan(rawAmb) || rawAmb < -40.0f) {
+      if (!isValidReading(rawObj, rawAmb)) {
+        // A failed read must not be fed into the DSP as 0 C.
         sensorOnline = false;
+        digitalWrite(ONBOARD_LED, HIGH); // LED OFF
+        webSocket.broadcastTXT("{\"online\":false}");
+        Serial.println("[SENSOR] Read failed - entering retry mode.");
+      } else {
+        // Process DSP metrics
+        HeatMetrics m = dsp.process(rawObj, rawAmb, now);
+
+        // Visual LED feedback for hotspots
+        if (m.isHotspot) {
+          digitalWrite(ONBOARD_LED, LOW); // LED ON
+        } else {
+          digitalWrite(ONBOARD_LED, HIGH); // LED OFF
+        }
+
+        // Broadcast JSON telemetry to browser
+        char jsonBuffer[160];
+        snprintf(jsonBuffer, sizeof(jsonBuffer),
+          "{\"online\":true,\"t_obj\":%.2f,\"t_amb\":%.2f,\"delta\":%.2f,\"rate\":%.2f,\"peak\":%.2f}",
+          m.filteredObj, m.rawAmb, m.delta, m.rateOfChange, m.peakTemp
+        );
+        webSocket.broadcastTXT(jsonBuffer);
+
+        // Periodic Serial Plotter trace
+        static uint32_t lastSerial = 0;
+        if (now - lastSerial >= 400) {
+          lastSerial = now;
+          Serial.printf("Obj: %.2f C | Amb: %.2f C | Delta: +%.2f C | Peak: %.2f C\n",
+            m.filteredObj, m.rawAmb, m.delta, m.peakTemp
+          );
+        }
       }
     } else {
       // Background retry probe every 2 seconds
@@ -142,35 +189,12 @@ void loop() {
         sensorOnline = tryInitSensor(4, 5, "Config A");
         if (!sensorOnline) sensorOnline = tryInitSensor(5, 4, "Config B");
       }
-    }
 
-    // Process DSP metrics
-    HeatMetrics m = dsp.process(rawObj, rawAmb, now);
-
-    // Visual LED feedback for hotspots
-    if (m.isHotspot) {
-      digitalWrite(ONBOARD_LED, LOW); // LED ON
-    } else {
-      digitalWrite(ONBOARD_LED, HIGH); // LED OFF
-    }
-
-    // Broadcast JSON telemetry to browser
-    char jsonBuffer[140];
-    snprintf(jsonBuffer, sizeof(jsonBuffer),
-      "{\"t_obj\":%.2f,\"t_amb\":%.2f,\"delta\":%.2f,\"rate\":%.2f,\"peak\":%.2f}",
-      m.filteredObj, m.rawAmb, m.delta, m.rateOfChange, m.peakTemp
-    );
-    webSocket.broadcastTXT(jsonBuffer);
-
-    // Periodic Serial Plotter trace
-    static uint32_t lastSerial = 0;
-    if (now - lastSerial >= 400) {
-      lastSerial = now;
-      if (sensorOnline) {
-        Serial.printf("Obj: %.2f C | Amb: %.2f C | Delta: +%.2f C | Peak: %.2f C\n",
-          m.filteredObj, m.rawAmb, m.delta, m.peakTemp
-        );
-      } else {
+      // Keep dashboards informed without spamming the socket at 33 Hz.
+      static uint32_t lastOfflineNotice = 0;
+      if (!sensorOnline && now - lastOfflineNotice >= 1000) {
+        lastOfflineNotice = now;
+        webSocket.broadcastTXT("{\"online\":false}");
         Serial.println("[STATUS] Waiting for MLX90614 sensor on D1/D2...");
       }
     }

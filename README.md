@@ -30,26 +30,41 @@ The MLX90614 communicates over I2C at 3.3V logic levels.
 
 ### 3. Spot Pyrometer & Delta Differential
 - Displays live surface temperature ($T_{obj}$), ambient reference ($T_{amb}$), and excess thermal delta ($\Delta T = T_{obj} - T_{amb}$).
-- Flags components that exceed a user-configurable thermal threshold (e.g. $> 45^{\circ}\text{C}$ or $\Delta T > 15^{\circ}\text{C}$).
+- Flags hotspots at a fixed threshold of $\Delta T \ge 15^{\circ}\text{C}$ or an absolute temperature of $50^{\circ}\text{C}$ (the alarm threshold is defined in `HeatMapDSP.h`).
 
 ---
 
 ## Network Configuration
 
-- **Target Wi-Fi Network:**
+- **Target Wi-Fi Network (Station mode only):**
   - **SSID:** `Pico`
   - **Password:** `12345678`
-- **Fallback Access Point (if router is offline):**
-  - **SSID:** `HeatMapper-AP`
-  - **IP:** `http://192.168.4.1`
+- **Hostname / mDNS:** `http://heatmapper.local` (started after the board obtains an IP address)
+- **Fallback:** none. If the `Pico` network is unavailable, the board keeps retrying in the background; it does **not** create `HeatMapper-AP`.
 
 ---
 
 ## Quickstart: How to Flash & Run
 
+### PlatformIO (recommended)
+1. Install [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/index.html) or the VS Code extension.
+2. From the project root run:
+   ```bash
+   pio run -e nodemcuv2 -t upload
+   ```
+3. Open Serial Monitor at **115200 baud**:
+   ```bash
+   pio device monitor
+   ```
+4. Open the printed IP address or `http://heatmapper.local` in a browser on the same Wi-Fi network.
+
+`platformio.ini` already declares the **WebSockets** and **Adafruit MLX90614** dependencies, so no manual library installation is needed.
+
 ### Arduino IDE
-1. Open [`firmware/CircuitHeatMapper.ino`](file:///Users/hariom/Documents/shigoto/embedded/firmware/CircuitHeatMapper.ino).
-2. Install the **WebSockets** library by *Markus Sattler* (`Sketch` -> `Include Library` -> `Manage Libraries...`).
-3. Select your board (e.g. `NodeMCU 1.0 (ESP-12E Module)`) and port `/dev/cu.usbserial-A5069RR4`.
+1. Open `CircuitHeatMapper/CircuitHeatMapper.ino` (the folder name must match the `.ino` file name; opening `firmware/CircuitHeatMapper.ino` directly will make the IDE complain and offer to move the sketch).
+2. Install these libraries via `Tools` -> `Manage Libraries...`:
+   - **WebSockets** by *Markus Sattler*
+   - **Adafruit MLX90614 Library** by *Adafruit* (accept the **Adafruit BusIO** dependency when prompted)
+3. Select your board (e.g. `NodeMCU 1.0 (ESP-12E Module)`) and the correct serial port.
 4. Click **Upload**.
 5. Open Serial Monitor at **115200 baud** to see the assigned IP address, then open that IP in any browser on the same Wi-Fi.

@@ -47,7 +47,7 @@ public:
     if (dt <= 0.001f) dt = 0.02f;
     _lastUpdateMs = nowMs;
 
-    // 1. Exponential Moving Average for optical noise rejection (alpha = 0.35 at 50Hz)
+    // 1. Exponential Moving Average for optical noise rejection (alpha = 0.35 at ~33Hz)
     const float alpha = 0.35f;
     _filteredObj += alpha * (rawObj - _filteredObj);
 
